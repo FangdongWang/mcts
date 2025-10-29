@@ -1,0 +1,18 @@
+mode: "mcts"          
+few_shot_path: "/home/fangdong.wang/mlm-evaluator/tools/mcts_cot_v2/data/few_shots.json"
+prompt_path: "/home/fangdong.wang/mlm-evaluator/tools/mcts_cot_v2/data/mcts_prompt.json" 
+errors_threshold: 2   # most allowed consecutive python errors
+prompt_wrap: "rstar"
+result_unwrap: "rstar"
+step_delim: "\n"
+stop: ["<end_of_step>", "<end_of_answer>"]
+max_depth: 4
+n_generate_sample: 12
+is_sampling: True
+iterations: 3 # rollout times
+need_value_func: True
+batch_size: 1
+num_few_shot: 0
+max_model_len: 4096
+update_leaf_value: True
+c_puct: 2

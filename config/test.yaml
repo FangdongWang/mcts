@@ -1,0 +1,25 @@
+mode: "mcts"          
+few_shot_path: "/home/fangdong.wang/mlm-evaluator/tools/mcts_cot_v2/data/few_shots.json"
+prompt_path: "/home/fangdong.wang/mlm-evaluator/tools/mcts_cot_v2/data/mcts_prompt.json" 
+prompt_wrap: "rstar"
+result_unwrap: "rstar"
+step_delim: "\n"
+batch_size: 1
+stop: ["<end_of_step>","<end_of_output>", "<end_of_answer>"]
+
+best_of: 12
+num_few_shot: 0
+max_model_len: 4096
+need_value_func: True 
+update_leaf_value: True 
+
+## MCTS 参数
+step_beam_width: 2 #beam width for each step
+n_generate_sample: 3 #"maximum depth of the tree, ie., maximum steps of completion."
+max_depth: 4
+iterations: 3 #number of simulations in mcts"
+c_puct: 2 #weight of c_puct in mcts
+is_sampling: True #solution generation in mcts
+errors_threshold: 5
+
+

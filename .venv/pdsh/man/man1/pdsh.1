@@ -1,0 +1,533 @@
+\." $Id$
+.\"
+.\"
+.TH "pdsh" "1" "linux-gnu" "pdsh-2.31"
+
+.SH NAME
+pdsh \- issue commands to groups of hosts in parallel
+
+.SH SYNOPSIS
+\fBpdsh\fR [\fIoptions\fR]... command
+
+.SH DESCRIPTION
+\fBpdsh\fR is a variant of the rsh(1) command. Unlike rsh(1), which runs
+commands on a single remote host, \fBpdsh\fR can run multiple remote commands
+in parallel. \fBpdsh\fR uses a "sliding window" (or \fIfanout\fR) of threads
+to conserve resources on the initiating host while allowing some 
+connections to time out. 
+.LP
+When \fBpdsh\fR receives SIGINT (ctrl-C), it lists the status of current 
+threads. A second SIGINT within one second terminates the program. Pending
+threads may be canceled by issuing ctrl-Z within one second of ctrl-C.
+Pending threads are those that have not yet been initiated, or are still
+in the process of connecting to the remote host.
+
+.LP
+If a remote command is not specified on the command line, \fBpdsh\fR
+runs interactively, prompting for commands and executing them when
+terminated with a carriage return. In interactive mode, target nodes
+that time out on the first command are not contacted for subsequent
+commands, and commands prefixed with an exclamation point will be 
+executed on the local system.
+.LP
+The core functionality of \fBpdsh\fR may be supplemented by dynamically
+loadable modules. The modules may provide a new connection protocol
+(replacing the standard rcmd(3) protocol used by rsh(1)), filtering
+options (e.g. removing hosts that are "down" from the target list),
+and/or host selection options (e.g., \fI\-a\fR selects all hosts from
+a configuration file.). By default, \fBpdsh\fR must have at least
+one "rcmd" module loaded. See the \fBRCMD MODULES\fR section for more 
+information.
+
+.SH "RCMD MODULES"
+The method by which \fBpdsh\fR runs commands on remote hosts may be
+selected at runtime using the \fI-R\fR option (See \fIOPTIONS\fR below).
+This functionality is ultimately implemented via dynamically loadable
+modules, and so the list of available options may be different
+from installation to installation. A list of currently available rcmd 
+modules is printed when using any of the \fI-h\fR, \fI-V\fR, or \fI-L\fR 
+options. The default rcmd module will also be displayed with the
+\fI-h\fR and \fI-V\fR options.
+.LP
+A list of \fIrcmd\fR modules currently distributed with \fBpdsh\fR 
+follows.
+.TP 8
+rsh
+Uses an internal, thread-safe implementation of BSD rcmd(3)
+to run commands using the standard rsh(1) protocol.
+.TP
+exec
+Executes an arbitrary command for each target host. The first
+of the \fBpdsh\fR remote arguments is the local command
+to execute, followed by any further arguments. Some simple
+parameters are substitued on the command line, including
+\fI%h\fR for the target hostname, \fI%u\fR for the remote
+username, and \fI%n\fR for the remote rank [0-n] (To get
+a literal \fI%\fR use \fI%%\fR).  For example,
+the following would duplicate using the \fBssh\fR module to
+run \fBhostname\fR(1) across the hosts foo[0-10]:
+
+.nf
+   pdsh -R exec -w foo[0-10] ssh -x -l %u %h hostname
+.fi
+
+and this command line would run \fBgrep\fR(1) in parallel 
+across the files console.foo[0-10]:
+
+.nf
+   pdsh -R exec -w foo[0-10] grep BUG console.%h
+.fi
+
+.TP
+ssh
+Uses a variant of popen(3) to run multiple copies of the ssh(1)
+command.
+.TP
+mrsh
+This module uses the mrsh(1) protocol to execute jobs on remote hosts.
+The mrsh protocol uses a credential based authentication, forgoing
+the need to allocate reserved ports. In other aspects, it acts just
+like rsh. Remote nodes must be running mrshd(8) in order for the mrsh
+module to work.
+.TP
+qsh
+Allows \fBpdsh\fR to execute MPI jobs over QsNet. Qshell propagates
+the current working directory, pdsh environment, and Elan capabilities
+to the remote process. The following environment variable are also
+appended to the environment: RMS_RANK, RMS_NODEID, RMS_PROCID, RMS_NNODES,
+and RMS_NPROCS. Since \fBpdsh\fR needs to run setuid root for qshell
+support, qshell does not directly support propagation of LD_LIBRARY_PATH
+and LD_PREOPEN. Instead the QSHELL_REMOTE_LD_LIBRARY_PATH and 
+QSHELL_REMOTE_LD_PREOPEN environment variables will may be used and will
+be remapped to LD_LIBRARY_PATH and LD_PREOPEN by the qshell daemon if set.
+.TP
+mqsh
+Similar to qshell, but uses the mrsh protocol instead of the rsh protocol.
+.TP
+krb4
+The krb4 module allows users to execute remote commands after 
+authenticating with kerberos. Of course, the remote rshd daemons
+must be kerberized.
+.TP
+xcpu
+The xcpu module uses the xcpu service to execute remote commands.
+
+.SH OPTIONS
+The list of available options is determined at runtime
+by supplementing the list of standard \fBpdsh\fR options with
+any options provided by loaded \fIrcmd\fR and \fImisc\fR modules.
+In some cases, options provided by modules may conflict with
+each other. In these cases, the modules are incompatible and
+the first module loaded wins.
+
+.SH "Standard target nodelist options"
+.TP
+\fB\-w\fR \fITARGETS,...\fR
+Target and or filter the specified list of hosts. Do not use with any
+other node selection options (e.g. \fI\-a\fR, \fI\-g\fR, if they are
+available). No spaces are allowed in the comma-separated list.  Arguments in
+the \fITARGETS\fR list may include normal host names, a range of hosts
+in hostlist format (See \fBHOSTLIST EXPRESSIONS\fR), or a single `-'
+character to read the list of hosts on stdin.
+
+If a host or hostlist is preceded by a `-' character, this causes those
+hosts to be explicitly excluded. If the argument is preceded by a single `^'
+character, it is taken to be the path to file containing a list of hosts,
+one per line. If the item begins with a `/' character, it is taken  as a
+regular expression on which to filter the list of hosts (a regex argument
+may also be optionally trailed by another '/', e.g.  /node.*/). A regex or
+file name argument may also be preceeded by a minus `-' to exclude instead
+of include thoses hosts.
+
+A list of hosts may also be preceded by "user@" to specify a remote
+username other than the default, or "rcmd_type:" to specify an alternate
+rcmd connection type for these hosts. When used together, the rcmd type
+must be specified first, e.g. "ssh:user1@host0" would use ssh to connect
+to host0 as user "user1."
+
+
+.TP
+.I \fB-x\fR \fIhost,host,...\fR
+Exclude the specified hosts. May be specified in conjunction with
+other target node list options such as \fI\-a\fR and \fI\-g\fR (when
+available). Hostlists may also be specified to the \fI\-x\fR option
+(see the \fBHOSTLIST EXPRESSIONS\fR section below). Arguments to
+\fI-x\fR may also be preceeded by the filename (`^') and regex ('/')
+characters as described above, in which case the resulting hosts are excluded
+as if they had been given to \fB\-w\fR and preceeded with the minus `-'
+character.
+
+.SH "Standard pdsh options"
+.TP 
+.I "-S"
+Return the largest of the remote command return values.
+.TP
+.I "-h"
+Output usage menu and quit. A list of available rcmd modules
+will also be printed at the end of the usage message.
+.TP
+.I "-s"
+Only on AIX, separate remote command stderr and stdout into two sockets.
+.TP
+.I "-q"
+List option values and the target nodelist and exit without action.
+.TP
+.I "-b"
+Disable ctrl-C status feature so that a single ctrl-C kills parallel
+job. (Batch Mode)
+.TP
+.I "-l user"
+This option may be used to run remote commands as another user, subject to
+authorization. For BSD rcmd, this means the invoking user and system must
+be listed in the user\'s .rhosts file (even for root).
+.TP
+.I "-t seconds"
+Set the connect timeout. Default is 10 seconds.
+.TP
+.I "-u seconds"
+Set a limit on the amount of time a remote command is allowed to execute.
+Default is no limit. See note in LIMITATIONS if using \fI-u\fR with ssh.
+.TP
+.I "-f number"
+Set the maximum number of simultaneous remote commands to \fInumber\fR.
+The default is 32. 
+.TP
+.I "-R name"
+Set rcmd module to \fIname\fR. This option may also be set via the
+PDSH_RCMD_TYPE environment variable. A list of available rcmd
+modules may be obtained via the \fI-h\fR, \fI-V\fR, or \fI-L\fR options. 
+The default will be listed with \fI-h\fR or \fI-V\fI.
+.TP
+.I "-M name,..."
+When multiple \fBmisc\fR modules provide the same options to \fBpdsh\fR,
+the first module initialized "wins" and subsequent modules are not loaded.
+The \fI-M\fR option allows a list of modules to be specified that will be
+force-initialized before all others, in-effect ensuring that they load
+without conflict (unless they conflict with eachother). This option may
+also be set via the PDSH_MISC_MODULES environment variable.
+.TP
+.I "-L"
+List info on all loaded \fBpdsh\fR modules and quit.
+.TP
+.I "-N"
+Disable hostname: prefix on lines of output.
+.TP
+.I "-d"
+Include more complete thread status when SIGINT is received, and display
+connect and command time statistics on stderr when done.
+.TP
+.I "-V"
+Output \fBpdsh\fR version information, along with list of currently
+loaded modules, and exit.
+
+.SH "qsh/mqsh module options"
+.TP
+.I "-n tasks_per_node"
+Set the number of tasks spawned per node. Default is 1.
+.TP
+.I "-m block | cyclic"
+Set block versus cyclic allocation of processes to nodes. Default is
+block. 
+.TP
+.I "-r railmask"
+Set the rail bitmask for a job on a multirail system. The default 
+railmask is 1, which corresponds to rail 0 only. Each bit set in 
+the argument to \fI-r\fR corresponds to a rail on the system, so
+a value of 2 would correspond to rail 1 only, and 3 would indicate
+to use both rail 1 and rail 0.
+
+.SH "machines module options"
+.TP
+.I "-a"
+Target all nodes from machines file.
+
+.SH "genders module options"
+.LP
+In addition to the genders options presented below, the genders 
+attribute pdsh_rcmd_type may also be used in the genders database
+to specify an alternate rcmd connect type than the pdsh default
+for hosts with this attribute. For example, the following line
+in the genders file
+.nf
+
+  host0 pdsh_rcmd_type=ssh
+
+.fi
+would cause \fBpdsh\fR to use ssh to connect to host0, even if rsh were 
+the default.  This can be overridden on the commandline with the 
+"rcmd_type:host0" syntax.
+
+.TP 
+.I "-A"
+Target all nodes in genders database. The \fI-A\fR option will target
+every host listed in genders -- if you want to omit some hosts by default,
+see the \fI-a\fR option below.
+.TP
+.I "-a"
+Target all nodes in genders database except those with the "pdsh_all_skip"
+attribute. This is shorthand for running "pdsh -A -X pdsh_all_skip ..."
+.TP 
+.I "-g attr[=val][,attr[=val],...]"
+Target nodes that match any of the specified genders attributes (with
+optional values). Conflicts with the \fI\-a\fR option. If used in
+combination with other node selection options like \fI-w\fR, the
+\fI-g\fR option will select from the supplied node list, instead of
+from the genders file as a whole. Otherwise, This
+option targets the alternate hostnames in the genders database by
+default. The \fI\-i\fR option provided by the genders module may be used
+to translate these to the canonical genders hostnames. If the installed
+version of genders supports it, attributes supplied to \fI-g\fR may also
+take the form of genders \fBqueries\fR. Genders \fBqueries\fR will query
+the genders database for the union, intersection, difference, or complement
+of genders attributes and values.  The set operation union is represented
+by two pipe symbols ('||'), intersection by two ampersand symbols ('&&'),
+difference by two minus symbols ('--'), and complement by a tilde ('~').
+Parentheses may be used to change the order of operations. See the
+nodeattr(1) manpage for examples of genders \fBqueries\fR.
+.TP
+.I "-X attr[=val][,attr[=val],...]"
+Exclude nodes that match any of the specified genders attributes
+(optionally with values).  This option may be used in combination with any
+other of the node selection options (e.g. \fI-w\fR, \fI-g\fR, \fI-a\fR,
+...). If the installed version of genders supports it, arguments to
+\fI-X\fR may also take the form of genders \fBqueries\fR. Please see
+documentation for the genders \fI-g\fR option for more information about
+genders \fBqueries\fR.
+.TP
+.I "-i"
+Request translation between canonical and alternate hostnames. 
+.TP
+.I "-F filename"
+Read genders information from \fIfilename\fR instead of the system
+default genders file. If \fIfilename\fR doesn't specify an absolute
+path then it is taken to be relative to the directory specified by the
+\fIPDSH_GENDERS_DIR\fR environment variable (/etc by default). An
+alternate genders file may also be specified via the \fIPDSH_GENDERS_FILE\fR
+environment variable.
+
+.SH "nodeupdown module options"
+.TP
+.I "-v"
+Eliminate target nodes that are considered "down" by libnodeupdown.
+
+.SH "slurm module options"
+The \fBslurm\fI module allows \fBpdsh\fR to target nodes based on 
+currently running SLURM jobs. The \fBslurm\fR module is typically
+called after all other node selection options have been processed, 
+and if no nodes have been selected, the module will attempt to
+read a running jobid from the SLURM_JOBID environment variable 
+(which is set when running under a SLURM allocation). If SLURM_JOBID
+references an invalid job, it will be silently ignored.
+.TP
+.I "-j jobid[,jobid,...]"
+Target list of nodes allocated to the SLURM job \fIjobid\fR. This option
+may be used multiple times to target multiple SLURM jobs. The special
+argument "all" can be used to target all nodes running SLURM jobs, e.g.
+\fI-j all\fR.
+.TP
+.I "-P partition[,partition,...]"
+Target list of nodes containing in the SLURM partition \fIpartition\fR.
+This option may be used multiple times to target multiple SLURM partitions
+and/or partitions may be given in a comma-delimited list.
+
+.SH "torque module options"
+The \fBtorque\fI module allows \fBpdsh\fR to target nodes based on
+currently running Torque/PBS jobs. Similar to the slurm module, the
+\fBtorque\fR module is typically called after all other node
+selection options have been processed, and if no nodes have been
+selected, the module will attempt to read a running jobid from
+the PBS_JOBID environment variable (which is set when running under
+a Torque allocation).
+.TP
+.I "-j jobid[,jobid,...]"
+Target list of nodes allocated to the Torque job \fIjobid\fR. This option
+may be used multiple times to target multiple Torque jobs.
+
+.SH "rms module options"
+The \fBrms\fR module allows pdsh to target nodes based on an RMS 
+resource. The \fBrms\fR module is typically called after all other
+node selection options, and if no nodes have been selected, the 
+module will examine the RMS_RESOURCEID environment variable and
+attempt to set the target list of hosts to the nodes in the 
+RMS resource. If an invalid resource is denoted, the variable is
+silently ignored.
+
+.SH "SDR module options"
+The SDR module supports targeting hosts via the System Data Repository
+on IBM SPs.
+.TP
+.I "-a"
+Target all nodes in the SDR. The list is generated from the 
+"reliable hostname" in the SDR by default.
+.TP
+.I "-i"
+Translate hostnames between reliable and initial in the SDR, when applicable. 
+If the a target hostname matches either the initial or reliable hostname
+in the SDR, the alternate name will be substitued. Thus a list composed
+of initial hostnames will instead be replaced with a list of reliable hostnames.
+For example, when used with \fI-a\fR above, all initial hostnames in 
+the SDR are targeted.
+.TP
+.I "-v"
+Do not target nodes that are marked as not responding in the SDR on
+the targeted interface. (If a hostname does not appear in the SDR, then
+that name will remain in the target hostlist.)
+.TP
+.I "-G"
+In combination with \fI-a\fR, include all partitions.
+
+.SH "nodeattr module options"
+The \fBnodeattr\fR module supports access to the genders database
+via the nodeattr(1) command. See the \fBgenders\fR section above
+for a list of support options with this module. The option usage
+with the \fBnodeattr\fR module is the same as \fBgenders\fR, above,
+with the exception that the \fI-i\fR option may only be used
+with \fI-a\fR or \fI-g\fR. \fBNOTE\fR: This module will only
+work with very old releases of genders where the \fBnodeattr\fR(1)
+command supports the \fI-r\fR option, and before the libgenders
+API was available. Users running newer versions of genders
+will need to use the \fBgenders\fR module instead.
+
+.SH "dshgroup module options"
+The dshgroup module allows pdsh to use dsh (or Dancer's shell) style
+group files from /etc/dsh/group/ or ~/.dsh/group/. The default search
+path may be overridden with the DSHGROUP_PATH environment variable, a
+colon-separated list of directories to search. The default value
+for DSHGROUP_PATH is /etc/dsh/group.
+.TP
+.I "-g groupname,..."
+Target nodes in dsh group file "groupname" found in either 
+~/.dsh/group/groupname or /etc/dsh/group/groupname.
+.TP
+.I "-X groupname,..."
+Exclude nodes in dsh group file "groupname."
+.PP
+As an enhancement in \fBpdsh\fR, dshgroup files may optionally
+include other dshgroup files via a special \fI#include STRING\fR syntax.
+The argument to \fI#include\fR may be either a file path, or a group
+name, in which case the path used to search for the group file is the
+same as if the group had been specified to \fI-g\fR.
+
+.SH "netgroup module options"
+The netgroup module allows pdsh to use standard netgroup entries to
+build lists of target hosts. (/etc/netgroup or NIS)
+.TP
+.I "-g groupname,..."
+Target nodes in netgroup "groupname." 
+.TP
+.I "-X groupname,..."
+Exclude nodes in netgroup "groupname."
+
+.SH "ENVIRONMENT VARIABLES"
+.PP
+.TP 
+PDSH_RCMD_TYPE
+Equivalent to the \fI-R\fR option, the value of this environment 
+variable will be used to set the default rcmd module for pdsh to
+use (e.g. ssh, rsh).
+.TP
+PDSH_SSH_ARGS
+Override the standard arguments that \fBpdsh\fR passes to the
+ssh(1) command ("-2 -a -x -l%u %h"). The use of the parameters
+\fB%u\fR, \fB%h\fR, and \fB%n\fR (as documented in the \fBrcmd/exec\fR
+section above) is optional. If these parameters are missing,
+\fBpdsh\fR will append them to the ssh commandline because it is
+assumed they are mandatory.
+.TP
+PDSH_SSH_ARGS_APPEND
+Append additional options to the ssh(1) command invoked by \fBpdsh\fR.
+For example, PDSH_SSH_ARGS_APPEND="-q" would run ssh in quiet mode,
+or "-v" would increase the verbosity of ssh. (Note: these arguments
+are actually prepended to the ssh commandline to ensure they appear
+before any target hostname argument to ssh.)
+.TP
+WCOLL
+If no other node selection option is used, the WCOLL environment
+variable may be set to a filename from which a list of target
+hosts will be read. The file should contain a list of hosts,
+one per line (though each line may contain a hostlist expression.
+See \fIHOSTLIST EXPRESSIONS\fR section below).
+.TP
+DSHPATH
+If set, the path in DSHPATH will be used as the PATH for the
+remote processes.
+.TP
+FANOUT
+Set the \fBpdsh\fR fanout (See description of \fI-f\fR above).
+
+.SH "HOSTLIST EXPRESSIONS"
+As noted in sections above \fBpdsh\fR accepts lists of hosts the general
+form: prefix[n-m,l-k,...], where n < m and l < k, etc., as an alternative
+to explicit lists of hosts. This form should not be confused with regular
+expression character classes (also denoted by ``[]''). For example, foo[19]
+does not represent an expression matching foo1 or foo9, but rather 
+represents the degenerate hostlist: foo19.
+
+The hostlist syntax is meant only as a convenience on clusters with a 
+"prefixNNN" naming convention and specification of ranges should not be
+considered necessary -- this foo1,foo9 could be specified as such, or
+by the hostlist foo[1,9].
+
+Some examples of usage follow:
+
+.nf
+
+Run command on foo01,foo02,...,foo05
+    pdsh -w foo[01-05] command
+
+Run command on foo7,foo9,foo10
+	pdsh -w foo[7,9-10] command
+
+Run command on foo0,foo4,foo5
+	pdsh -w foo[0-5] -x foo[1-3] command
+
+.fi
+
+A suffix on the hostname is also supported:
+
+.nf
+
+Run command on foo0-eth0,foo1-eth0,foo2-eth0,foo3-eth0
+   pdsh -w foo[0-3]-eth0 command
+
+.fi
+
+As a reminder to the reader, some shells will interpret brackets ('['
+and ']') for pattern matching.  Depending on your shell, it may be
+necessary to enclose ranged lists within quotes.  For example, in
+tcsh, the first example above should be executed as:
+
+	pdsh -w "foo[01-05]" command
+
+.SH "ORIGIN"
+Originally a rewrite of IBM dsh(1) by Jim Garlick <garlick@llnl.gov>
+on LLNL's ASCI Blue-Pacific IBM SP system. It is now used on Linux clusters
+at LLNL.
+
+.SH "LIMITATIONS"
+.LP
+When using \fBssh\fR for remote execution, expect the stderr of ssh to be
+folded in with that of the remote command. When invoked by \fBpdsh\fR, it
+is not possible for \fBssh\fR to prompt for passwords if RSA/DSA keys
+are configured properly, etc..  For \fBssh\fR implementations that suppport
+a connect timeout option, \fBpdsh\fR attempts to use that option to
+enforce the timeout (e.g. -oConnectTimeout=T for OpenSSH), otherwise
+connect timeouts are not supported when using \fBssh\fR.  Finally, there 
+is no reliable way for \fBpdsh\fR to ensure that remote commands are 
+actually terminated when using a command timeout. Thus if \fI-u\fR is 
+used with \fBssh\fR commands may be left running on remote hosts even 
+after timeout has killed local \fBssh\fR processes.
+
+Output from multiple processes per node may be interspersed when using qshell
+or mqshell rcmd modules.
+
+The number of nodes that \fBpdsh\fR can simultaneously execute remote
+jobs on is limited by the maximum number of threads that can be created
+concurrently, as well as the availability of reserved ports in the rsh 
+and qshell rcmd modules. On systems that implement Posix threads, the limit
+is typically defined by the constant PTHREADS_THREADS_MAX.
+
+.SH "FILES"
+
+.SH "SEE ALSO"
+rsh(1), ssh(1), dshbak(1), pdcp(1)
